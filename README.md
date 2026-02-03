@@ -77,6 +77,100 @@ For meshes not imported from VOX:
 - **Use Material Base Color**: Extract colors from Principled BSDF materials
 - **Palette Mode**: How to handle color quantization
 
+---
+
+## Preparing Blender Models for Voxel Export
+
+This guide explains how to prepare your Blender models so they export correctly to MagicaVoxel with the colors you want.
+
+### Method 1: Single Material (Uniform Color)
+
+For objects that should be one solid color:
+
+1. **Select your object** in Object Mode
+2. Go to **Material Properties** (sphere icon in Properties panel)
+3. Click **+ New** to create a material
+4. In the material settings, find **Base Color** under "Surface"
+5. Click the color swatch and choose your desired color
+6. **Export** with these settings:
+   - ✅ Use Material Base Color: **Enabled**
+   - Voxel Size: Adjust based on desired detail
+
+### Method 2: Multiple Materials (Different Parts, Different Colors)
+
+For objects with different colored regions:
+
+1. **Enter Edit Mode** (`Tab` key)
+2. **Select faces** that should be one color (`L` to select linked, or box select)
+3. In Material Properties, click **+ New** to create a material
+4. Set the **Base Color** for this material
+5. Click **Assign** to assign selected faces to this material
+6. Repeat for other regions with different colors
+7. **Export** with:
+   - ✅ Use Material Base Color: **Enabled**
+
+### Method 3: Vertex Colors (Most Control)
+
+For pixel-art style or complex color patterns:
+
+1. **Select your object** and enter **Vertex Paint** mode (from mode dropdown)
+2. Choose a color from the color picker
+3. **Paint** directly on the mesh faces
+4. Use `Shift+K` to fill selected faces with the current color
+5. **Export** with:
+   - ✅ Use Vertex Colors: **Enabled**
+
+> **Tip**: Vertex colors give you per-face color control, which maps perfectly to voxels!
+
+### Export Settings Recommendations
+
+| Scenario | Voxel Size | Max Size | Ray Samples | Fill Interior |
+|----------|------------|----------|-------------|---------------|
+| Simple shapes | 0.1 | 64 | 3 | Off |
+| Detailed models | 0.05 | 128 | 5 | Off |
+| Characters | 0.05 | 126 | 5 | Off |
+| Solid objects | 0.1 | 64 | 3 | **On** |
+| Maximum detail | 0.02 | 256 | 7 | Off |
+
+### Common Issues & Solutions
+
+#### Mixed colors when expecting uniform color
+- **Cause**: No material assigned, or material color not set
+- **Fix**: Create a material and set its Base Color explicitly
+
+#### Black voxels appearing
+- **Cause**: Some faces have no material or the mesh has holes
+- **Fix**: Ensure all faces have a material assigned; check mesh is manifold
+
+#### Colors look washed out
+- **Cause**: Blender's color management (sRGB vs Linear)
+- **Fix**: In MagicaVoxel, colors are direct RGB. Set your Blender material Base Color to the exact RGB values you want.
+
+#### Voxels missing in thin areas
+- **Cause**: Voxel size too large for thin geometry
+- **Fix**: Reduce voxel size or thicken the geometry
+
+### Quick Workflow Example
+
+**Creating a colored cube for MagicaVoxel:**
+
+1. `Shift+A` → Mesh → Cube
+2. Go to Material Properties → **+ New**
+3. Set Base Color to your desired color (e.g., bright red: `#FF0000`)
+4. `File > Export > MagicaVoxel (.vox)`
+5. Settings: Voxel Size `0.5`, Max Size `64`
+6. Export!
+
+**Creating a multi-colored character:**
+
+1. Model your character
+2. In Edit Mode, select the head faces → Create material "Skin" (peach color) → Assign
+3. Select body faces → Create material "Shirt" (blue color) → Assign
+4. Select leg faces → Create material "Pants" (brown color) → Assign
+5. Export with default settings
+
+---
+
 ## Troubleshooting
 
 ### Colors look different after export

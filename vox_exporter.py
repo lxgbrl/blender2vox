@@ -266,12 +266,39 @@ class VoxExporter:
         if self.apply_transforms:
             mesh.transform(obj.matrix_world)
 
+        # Get color data BEFORE triangulation (from original mesh)
+        # We need to map original polygon -> color
+        original_colors = self._extract_colors(mesh, obj)
+
         # Create BVH tree for ray casting
         bm = bmesh.new()
         bm.from_mesh(mesh)
-        bm.transform(Matrix.Identity(4))  # Already transformed
+
+        # Store original face index before triangulation
+        # Create a custom layer to track which original polygon each triangle came from
+        orig_face_layer = bm.faces.layers.int.new('orig_face')
+        for face in bm.faces:
+            face[orig_face_layer] = face.index
+
+        # Triangulate - this creates new faces but preserves the layer data
         bmesh.ops.triangulate(bm, faces=bm.faces)
+
+        # Build mapping from triangulated face index to original face index
+        bm.faces.ensure_lookup_table()
+        tri_to_orig = {}
+        for i, face in enumerate(bm.faces):
+            tri_to_orig[i] = face[orig_face_layer]
+
         bvh = BVHTree.FromBMesh(bm)
+
+        # Build color_data with triangulated face mapping
+        color_data = {
+            'tri_to_orig': tri_to_orig,
+            'vertex_colors': original_colors['vertex_colors'],
+            'material_colors': original_colors['material_colors'],
+            'face_materials': original_colors['face_materials'],
+            'default_color': original_colors['default_color'],
+        }
 
         # Calculate bounding box
         bbox_min = Vector((float('inf'), float('inf'), float('inf')))
@@ -285,9 +312,6 @@ class VoxExporter:
             bbox_max.x = max(bbox_max.x, co.x)
             bbox_max.y = max(bbox_max.y, co.y)
             bbox_max.z = max(bbox_max.z, co.z)
-
-        # Get color data
-        color_data = self._extract_colors(mesh, obj)
 
         # Calculate grid dimensions
         size = bbox_max - bbox_min
@@ -464,10 +488,20 @@ class VoxExporter:
         return True, color
 
     def _get_face_color(self, face_idx: int, color_data: Dict) -> Tuple[int, int, int]:
-        """Get the color for a face."""
-        # Try vertex colors first
-        if color_data['vertex_colors'] and face_idx in color_data['vertex_colors']:
-            colors = color_data['vertex_colors'][face_idx]
+        """Get the color for a face.
+
+        Args:
+            face_idx: The triangulated face index from BVH ray cast
+            color_data: Color data dict containing tri_to_orig mapping
+        """
+        # Map triangulated face index back to original polygon index
+        orig_face_idx = face_idx
+        if 'tri_to_orig' in color_data and face_idx in color_data['tri_to_orig']:
+            orig_face_idx = color_data['tri_to_orig'][face_idx]
+
+        # Try vertex colors first (using original polygon index)
+        if color_data['vertex_colors'] and orig_face_idx in color_data['vertex_colors']:
+            colors = color_data['vertex_colors'][orig_face_idx]
             if colors:
                 # Average vertex colors for the face
                 r = sum(c[0] for c in colors) // len(colors)
@@ -475,9 +509,9 @@ class VoxExporter:
                 b = sum(c[2] for c in colors) // len(colors)
                 return (r, g, b)
 
-        # Try material color
-        if face_idx < len(color_data['face_materials']):
-            mat_idx = color_data['face_materials'][face_idx]
+        # Try material color (using original polygon index)
+        if orig_face_idx < len(color_data['face_materials']):
+            mat_idx = color_data['face_materials'][orig_face_idx]
             if mat_idx in color_data['material_colors']:
                 return color_data['material_colors'][mat_idx]
 
