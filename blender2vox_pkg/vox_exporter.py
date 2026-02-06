@@ -127,17 +127,10 @@ class VoxExporter:
         self.preserve_vox_data = preserve_vox_data
 
     def export(self, objects: List[bpy.types.Object], filepath: str):
-        """Export objects to VOX file.
-
-        For multiple objects, each object becomes a separate model with its
-        world position preserved in the scene graph.
-        """
-        writer = vox_writer.VoxWriter()
+        """Export objects to VOX file."""
+        all_voxels = []  # Will contain (x, y, z, color_idx) for preserved, (x, y, z, (r,g,b)) for voxelized
         original_palette = None
-        all_use_original_indices = True
-
-        # Collect model data for each object
-        object_data = []  # List of (obj, voxels, uses_original_indices, palette)
+        use_original_indices = False
 
         for obj in objects:
             # Check if this object has VOX metadata (was imported from VOX)
@@ -145,74 +138,51 @@ class VoxExporter:
                 metadata = vox_importer.get_vox_metadata(obj)
                 if metadata and 'voxels' in metadata and metadata.get('palette'):
                     print(f"Using preserved VOX data for {obj.name}")
-                    voxels = [(x, y, z, c) for x, y, z, c in metadata['voxels']]
-                    object_data.append((obj, voxels, True, metadata['palette']))
-                    if original_palette is None:
-                        original_palette = metadata['palette']
+                    # Use original voxel data with ORIGINAL color indices
+                    for voxel in metadata['voxels']:
+                        x, y, z, color_idx = voxel
+                        all_voxels.append((x, y, z, color_idx))
+
+                    original_palette = metadata['palette']
+                    use_original_indices = True
                     continue
 
             # No VOX metadata, voxelize the mesh
-            all_use_original_indices = False
             voxels = self._voxelize_object(obj)
-            object_data.append((obj, voxels, False, None))
+            all_voxels.extend(voxels)
 
-        if not object_data:
-            raise ValueError("No objects to export")
+        if not all_voxels:
+            raise ValueError("No voxels generated from objects")
 
-        # Check if we have a mix of preserved and voxelized
-        has_preserved = any(d[2] for d in object_data)
-        has_voxelized = any(not d[2] for d in object_data)
+        # Calculate bounding box
+        min_x = min(v[0] for v in all_voxels)
+        min_y = min(v[1] for v in all_voxels)
+        min_z = min(v[2] for v in all_voxels)
+        max_x = max(v[0] for v in all_voxels)
+        max_y = max(v[1] for v in all_voxels)
+        max_z = max(v[2] for v in all_voxels)
 
-        if has_preserved and has_voxelized:
-            print("Warning: Mixed preserved VOX data and voxelized meshes. Using voxelized mode.")
-            all_use_original_indices = False
+        # Calculate actual model size
+        size_x = max_x - min_x + 1
+        size_y = max_y - min_y + 1
+        size_z = max_z - min_z + 1
 
-        # Set up palette
-        if all_use_original_indices and original_palette:
-            print("Using original palette")
+        # Create VOX file
+        writer = vox_writer.VoxWriter()
+        model = vox_writer.VoxModel(size_x, size_y, size_z)
+
+        if use_original_indices and original_palette:
+            # Use original palette and color indices exactly
+            print("Using original palette and color indices")
+
+            # Set the original palette
             for i, (r, g, b, a) in enumerate(original_palette):
-                if i < 255:
+                if i < 255:  # VOX palette has 255 usable colors (1-255)
                     writer.palette.set_color(i + 1, r, g, b, a)
-            color_map = None  # Use original indices
-        else:
-            # Collect all colors from voxelized objects for palette
-            all_colors = []
-            for obj, voxels, uses_orig, _ in object_data:
-                if not uses_orig:
-                    all_colors.extend([v[3] for v in voxels])
 
-            if all_colors:
-                palette, color_map = quantize_colors(all_colors, 255)
-                for i, (r, g, b) in enumerate(palette):
-                    writer.palette.set_color(i + 1, r, g, b, 255)
-                print(f"Created palette with {len(palette)} colors")
-            else:
-                color_map = {}
-
-        # Create models and instances for each object
-        for obj, voxels, uses_original_indices, obj_palette in object_data:
-            if not voxels:
-                print(f"Skipping {obj.name}: no voxels")
-                continue
-
-            # Calculate local bounding box for this model
-            min_x = min(v[0] for v in voxels)
-            min_y = min(v[1] for v in voxels)
-            min_z = min(v[2] for v in voxels)
-            max_x = max(v[0] for v in voxels)
-            max_y = max(v[1] for v in voxels)
-            max_z = max(v[2] for v in voxels)
-
-            size_x = max_x - min_x + 1
-            size_y = max_y - min_y + 1
-            size_z = max_z - min_z + 1
-
-            # Create the model with normalized coordinates
-            model = vox_writer.VoxModel(size_x, size_y, size_z)
+            # Add voxels with original color indices, normalizing coordinates
             seen = set()
-
-            for x, y, z, color_data in voxels:
-                # Normalize to model-local coordinates
+            for x, y, z, color_idx in all_voxels:
                 nx = x - min_x
                 ny = y - min_y
                 nz = z - min_z
@@ -223,47 +193,69 @@ class VoxExporter:
                 nz = max(0, min(255, nz))
 
                 key = (nx, ny, nz)
-                if key in seen:
-                    continue
+                if key not in seen:
+                    seen.add(key)
+                    # Ensure color index is valid (1-255)
+                    if 1 <= color_idx <= 255:
+                        model.add_voxel(nx, ny, nz, color_idx)
+                    else:
+                        model.add_voxel(nx, ny, nz, 1)  # Default to first color
+
+            writer.add_model(model)
+            writer.write(filepath)
+
+            print(f"Exported {len(seen)} voxels to {filepath}")
+            print(f"Model size: {size_x} x {size_y} x {size_z}")
+            return
+
+        # Standard export path: normalize and quantize colors
+        normalized_voxels = []
+        for x, y, z, color in all_voxels:
+            nx = x - min_x
+            ny = y - min_y
+            nz = z - min_z
+
+            # Clamp to valid range
+            nx = max(0, min(255, nx))
+            ny = max(0, min(255, ny))
+            nz = max(0, min(255, nz))
+
+            normalized_voxels.append((nx, ny, nz, color))
+
+        # Remove duplicates (keep first occurrence)
+        seen = set()
+        unique_voxels = []
+        for voxel in normalized_voxels:
+            key = (voxel[0], voxel[1], voxel[2])
+            if key not in seen:
                 seen.add(key)
+                unique_voxels.append(voxel)
 
-                # Determine color index
-                if uses_original_indices or all_use_original_indices:
-                    color_idx = color_data if isinstance(color_data, int) else 1
-                    if not (1 <= color_idx <= 255):
-                        color_idx = 1
-                else:
-                    color_idx = color_map.get(color_data, 1) if color_map else 1
+        # Quantize colors
+        colors = [v[3] for v in unique_voxels]
 
-                model.add_voxel(nx, ny, nz, color_idx)
+        # Debug: show unique colors found
+        unique_colors_set = set(colors)
+        print(f"[DEBUG] Unique colors in voxels: {unique_colors_set}")
 
-            model_index = writer.add_model(model)
+        palette, color_map = quantize_colors(colors, 255)
+        print(f"[DEBUG] Palette: {palette[:10]}...")  # First 10
 
-            # Calculate world position for this object
-            # Get object's world location and convert to voxel units
-            world_loc = obj.matrix_world.translation
-            tx = int(round(world_loc.x / self.voxel_size))
-            ty = int(round(world_loc.y / self.voxel_size))
-            tz = int(round(world_loc.z / self.voxel_size))
+        # Set palette colors
+        for i, (r, g, b) in enumerate(palette):
+            writer.palette.set_color(i + 1, r, g, b, 255)
 
-            # MagicaVoxel uses center-based positioning, so offset by half model size
-            cx = size_x // 2
-            cy = size_y // 2
-            cz = size_z // 2
+        # Add voxels
+        for x, y, z, color in unique_voxels:
+            color_index = color_map.get(color, 1)
+            model.add_voxel(x, y, z, color_index)
 
-            # Add the local min offset back (model is normalized to 0,0,0)
-            tx += min_x + cx
-            ty += min_y + cy
-            tz += min_z + cz
-
-            # Get rotation (simplified - just identity for now)
-            rotation = 0
-
-            writer.add_instance(model_index, (tx, ty, tz), rotation, obj.name)
-            print(f"Added model {obj.name}: {len(seen)} voxels, size {size_x}x{size_y}x{size_z}, pos ({tx}, {ty}, {tz})")
-
+        writer.add_model(model)
         writer.write(filepath)
-        print(f"Exported {len(object_data)} models to {filepath}")
+
+        print(f"Exported {len(unique_voxels)} voxels to {filepath}")
+        print(f"Model size: {size_x} x {size_y} x {size_z}")
+        print(f"Palette colors: {len(palette)}")
 
     def _voxelize_object(self, obj: bpy.types.Object) -> List[Tuple[int, int, int, Tuple[int, int, int]]]:
         """Voxelize a single Blender object.

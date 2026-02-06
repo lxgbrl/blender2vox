@@ -14,7 +14,6 @@ File Structure (RIFF style):
 
 import struct
 from typing import List, Tuple, Dict, Optional
-from dataclasses import dataclass
 
 
 class VoxChunk:
@@ -171,160 +170,43 @@ class VoxPalette:
         return VoxChunk('RGBA', content)
 
 
-@dataclass
-class ModelInstance:
-    """Represents a model instance with transform in the scene."""
-    model_index: int  # Index into the models list
-    translation: Tuple[int, int, int] = (0, 0, 0)
-    rotation: int = 0  # MagicaVoxel rotation index
-    name: str = ""
-
-
 class VoxWriter:
-    """Writes MagicaVoxel .vox files with full scene graph support."""
-
-    VOX_VERSION = 200  # Version 200 for scene graph support
-
+    """Writes MagicaVoxel .vox files."""
+    
+    VOX_VERSION = 150
+    
     def __init__(self):
         self.models: List[VoxModel] = []
-        self.instances: List[ModelInstance] = []  # Model instances with transforms
         self.palette = VoxPalette()
-
-    def add_model(self, model: VoxModel) -> int:
-        """Add a model to the file.
-
-        Returns:
-            The model index (for use with add_instance)
-        """
+    
+    def add_model(self, model: VoxModel):
+        """Add a model to the file."""
         self.models.append(model)
-        return len(self.models) - 1
-
-    def add_instance(self, model_index: int, translation: Tuple[int, int, int] = (0, 0, 0),
-                     rotation: int = 0, name: str = ""):
-        """Add a model instance with transform.
-
-        Args:
-            model_index: Index of the model (from add_model)
-            translation: (x, y, z) world position
-            rotation: MagicaVoxel rotation index
-            name: Optional name for the instance
-        """
-        self.instances.append(ModelInstance(model_index, translation, rotation, name))
-
-    def _build_dict_bytes(self, d: Dict[str, str]) -> bytes:
-        """Build binary representation of a VOX dictionary."""
-        result = struct.pack('<I', len(d))
-        for key, val in d.items():
-            result += struct.pack('<I', len(key))
-            result += key.encode('ascii')
-            result += struct.pack('<I', len(val))
-            result += val.encode('ascii')
-        return result
-
-    def _build_scene_graph(self) -> bytes:
-        """Build the scene graph chunks (nTRN, nGRP, nSHP).
-
-        Scene graph structure:
-        - Node 0: Root transform (nTRN) -> points to group node 1
-        - Node 1: Group node (nGRP) -> contains all shape transforms
-        - Node 2, 4, 6, ...: Transform nodes (nTRN) -> point to shape nodes
-        - Node 3, 5, 7, ...: Shape nodes (nSHP) -> point to models
-        """
-        chunks = b''
-
-        # If no instances defined, create default instances at origin
-        instances = self.instances
-        if not instances:
-            instances = [ModelInstance(i, (0, 0, 0), 0, "") for i in range(len(self.models))]
-
-        num_instances = len(instances)
-
-        # Node IDs:
-        # 0 = root transform
-        # 1 = group node
-        # 2, 4, 6, ... = instance transforms (2 + i*2)
-        # 3, 5, 7, ... = shape nodes (3 + i*2)
-
-        # Root transform node (node 0) - points to group node 1
-        root_attrs = {}
-        root_frame_attrs = {}  # No transform at root
-
-        content = struct.pack('<I', 0)  # node_id = 0
-        content += self._build_dict_bytes(root_attrs)
-        content += struct.pack('<I', 1)  # child_node_id = 1 (group)
-        content += struct.pack('<I', 0xFFFFFFFF)  # reserved
-        content += struct.pack('<I', 0)  # layer_id
-        content += struct.pack('<I', 1)  # num_frames
-        content += self._build_dict_bytes(root_frame_attrs)
-        chunks += VoxChunk('nTRN', content).to_bytes()
-
-        # Group node (node 1) - contains all instance transform nodes
-        child_ids = [2 + i * 2 for i in range(num_instances)]
-
-        content = struct.pack('<I', 1)  # node_id = 1
-        content += self._build_dict_bytes({})  # attrs
-        content += struct.pack('<I', num_instances)  # num children
-        for child_id in child_ids:
-            content += struct.pack('<I', child_id)
-        chunks += VoxChunk('nGRP', content).to_bytes()
-
-        # Create transform and shape nodes for each instance
-        for i, inst in enumerate(instances):
-            transform_node_id = 2 + i * 2
-            shape_node_id = 3 + i * 2
-
-            # Transform node
-            trans_attrs = {}
-            if inst.name:
-                trans_attrs['_name'] = inst.name
-
-            frame_attrs = {}
-            if inst.translation != (0, 0, 0):
-                frame_attrs['_t'] = f"{inst.translation[0]} {inst.translation[1]} {inst.translation[2]}"
-            if inst.rotation != 0:
-                frame_attrs['_r'] = str(inst.rotation)
-
-            content = struct.pack('<I', transform_node_id)
-            content += self._build_dict_bytes(trans_attrs)
-            content += struct.pack('<I', shape_node_id)  # child = shape node
-            content += struct.pack('<I', 0xFFFFFFFF)  # reserved
-            content += struct.pack('<I', 0)  # layer_id
-            content += struct.pack('<I', 1)  # num_frames
-            content += self._build_dict_bytes(frame_attrs)
-            chunks += VoxChunk('nTRN', content).to_bytes()
-
-            # Shape node
-            content = struct.pack('<I', shape_node_id)
-            content += self._build_dict_bytes({})  # attrs
-            content += struct.pack('<I', 1)  # num_models
-            content += struct.pack('<I', inst.model_index)  # model_id
-            content += self._build_dict_bytes({})  # model attrs
-            chunks += VoxChunk('nSHP', content).to_bytes()
-
-        return chunks
-
+    
     def write(self, filepath: str):
-        """Write the VOX file with scene graph."""
+        """Write the VOX file."""
         with open(filepath, 'wb') as f:
             # Write header
             f.write(b'VOX ')
             f.write(struct.pack('<I', self.VOX_VERSION))
-
+            
             # Build children chunks for MAIN
             children_data = b''
-
+            
+            # If multiple models, add PACK chunk
+            if len(self.models) > 1:
+                pack_content = struct.pack('<I', len(self.models))
+                pack_chunk = VoxChunk('PACK', pack_content)
+                children_data += pack_chunk.to_bytes()
+            
             # Add SIZE and XYZI chunks for each model
             for model in self.models:
                 children_data += model.get_size_chunk().to_bytes()
                 children_data += model.get_xyzi_chunk().to_bytes()
-
-            # Add scene graph (nTRN, nGRP, nSHP)
-            if len(self.models) > 0:
-                children_data += self._build_scene_graph()
-
+            
             # Add RGBA palette chunk
             children_data += self.palette.get_rgba_chunk().to_bytes()
-
+            
             # Write MAIN chunk
             main_chunk = VoxChunk('MAIN', b'', children_data)
             f.write(main_chunk.to_bytes())
