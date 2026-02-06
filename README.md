@@ -1,4 +1,4 @@
-# Blender2Vox
+# Vox2Blender2Vox
 
 A Blender addon for importing and exporting MagicaVoxel `.vox` files with full round-trip support.
 
@@ -27,12 +27,12 @@ A Blender addon for importing and exporting MagicaVoxel `.vox` files with full r
 1. Download the latest release `.zip` file
 2. In Blender, go to `Edit > Preferences > Add-ons`
 3. Click `Install...` and select the ZIP file
-4. Enable the addon "Import-Export: Blender2Vox - MagicaVoxel Import/Export"
+4. Enable the addon "Import-Export: Vox2Blender2Vox - MagicaVoxel Import/Export"
 
 ### Method 2: Manual Installation
 
 1. Download or clone this repository
-2. Copy the `blender2vox` folder to your Blender addons directory:
+2. Copy the `vox2blender2vox` folder to your Blender addons directory:
    - **macOS**: `~/Library/Application Support/Blender/<version>/scripts/addons/`
    - **Windows**: `%APPDATA%\Blender Foundation\Blender\<version>\scripts\addons\`
    - **Linux**: `~/.config/blender/<version>/scripts/addons/`
@@ -201,7 +201,7 @@ For pixel-art style or complex color patterns:
 ## File Structure
 
 ```
-blender2vox/
+vox2blender2vox/
 ├── __init__.py       # Addon registration and UI
 ├── vox_reader.py     # VOX file parser
 ├── vox_writer.py     # VOX file writer

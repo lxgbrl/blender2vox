@@ -1,16 +1,16 @@
-# Blender2Vox - Blender to MagicaVoxel .vox Import/Export
+# Vox2Blender2Vox - MagicaVoxel .vox Import/Export for Blender
 # Import and export Blender meshes to/from MagicaVoxel .vox format
 
 bl_info = {
-    "name": "Blender2Vox - MagicaVoxel Import/Export",
+    "name": "Vox2Blender2Vox - MagicaVoxel Import/Export",
     "author": "Alex Gabriel",
     "version": (1, 0, 0),
     "blender": (2, 80, 0),
     "location": "File > Import/Export > MagicaVoxel (.vox)",
     "description": "Import and export MagicaVoxel .vox files with proper round-trip support",
     "warning": "",
-    "doc_url": "https://github.com/StudioGabrielDev/blender2vox",
-    "tracker_url": "https://github.com/StudioGabrielDev/blender2vox/issues",
+    "doc_url": "https://github.com/lxgbrl/vox2blender2vox",
+    "tracker_url": "https://github.com/lxgbrl/vox2blender2vox/issues",
     "category": "Import-Export",
 }
 
